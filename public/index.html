@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<title>GameControl Example</title>
+	<style>
+		body {
+			font-family: 'Anonymous Pro', monospace;
+			padding: 0;
+			margin: 0;
+			height: 100vh;
+			width: 100vw;
+			position: relative;
+			overflow: hidden;
+		}
+
+		#own-square {
+			position: absolute;
+			background: red;
+			width: 150px;
+			height: 150px;
+		}
+
+		#panel {
+			position: absolute;
+			top: 100%;
+			transform: translateY(-100%);
+			left: 0;
+			width: 100%;
+			height: 2rem;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			background: #333;
+			color: white;
+			display: flex;
+			column-gap: 0.5rem;
+		}
+
+		#nerd-panel {
+			position: absolute;
+			top: 0;
+			right: 0;
+			width: fit-content;
+			height: fit-content;
+			padding: 0.5rem;
+			background: #333;
+			color: white;
+			display: flex;
+			row-gap: 0.5rem;
+			flex-direction: column;
+			align-items: flex-end;
+		}
+
+		#nerd-panel #coordinates {
+			display: inline-block;
+			min-width: 15ch;
+		}
+
+		.square-name {
+			width: 100%;
+			height: 100%;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+		}
+	</style>
+	<script src="/socket.io/socket.io.js"></script>
+</head>
+
+<body>
+	<div id="own-square" style="top: 0; left: 0;"></div>
+
+	<div class="other-squares">
+		<!-- This is where the other squares will be added -->
+	</div>
+
+	<div id="panel">
+		<label for="name">Name:</label>
+		<input type="text" id="name" value="Player" />
+
+		<button id="connect">Connect</button>
+	</div>
+
+	<div id="nerd-panel">
+		<p>Coordinates: <span id="coordinates">0, 0</span></p>
+	</div>
+
+	<script src="/gamecontroller.min.js"></script>
+	<script>
+		const socket = io();
+
+		const otherSquares = {};
+
+		const renderOtherSquares = () => {
+			const otherSquaresContainer = document.querySelector('.other-squares');
+			otherSquaresContainer.innerHTML = '';
+
+			for (const id in otherSquares) {
+				const square = otherSquares[id];
+				const div = document.createElement('div');
+				div.style.position = 'absolute';
+				div.style.width = '150px';
+				div.style.height = '150px';
+				div.style.background =
+					`rgb(${square.col[0]}, ${square.col[1]}, ${square.col[2]})`;
+				div.style.top = square.y + 'px';
+				div.style.left = square.x + 'px';
+
+				const nameEl = document.createElement('div');
+				nameEl.innerText = square.name;
+				nameEl.className = 'square-name';
+				div.appendChild(nameEl);
+
+				otherSquaresContainer.appendChild(div);
+			}
+		};
+
+		const squareState = {
+			x: 0,
+			y: 0,
+			col: [255, 0, 0],
+			pressed: {
+				up: false,
+				right: false,
+				down: false,
+				left: false
+			},
+			colChanged: false,
+			name: 'Player'
+		}
+
+		const squareConsts = {
+			width: 150,
+			height: 150,
+			speed: 10,
+			colorSpeed: 15
+		}
+
+		socket.on('user-joined', (data) => {
+			console.log('User joined:', data);
+			otherSquares[data.id] = data;
+
+			renderOtherSquares();
+
+			socket.emit('change', squareState);
+		});
+
+		socket.on('change', (data) => {
+			console.log('Change:', data);
+			otherSquares[data.id] = data;
+			renderOtherSquares();
+		});
+
+		socket.on('user-left', (data) => {
+			console.log('User left:', data);
+			delete otherSquares[data];
+			renderOtherSquares();
+		});
+
+		document.querySelector('#connect').addEventListener('click', () => {
+			console.log('Connected');
+
+			const name = document.querySelector('#name').value;
+			squareState.name = name;
+
+			socket.emit('join-game', squareState);
+		});
+
+		gameControl.on('connect', (gp) => {
+			const square = document.querySelector('#own-square');
+
+			const renderSquare = () => {
+				let { x, y, col } = squareState;
+				x = x != null ? x : parseInt(square.style.left);
+				y = y != null ? y : parseInt(square.style.top);
+
+				const {
+					width,
+					height
+				} = squareConsts;
+
+				if (y + height < 0)
+					y = document.body.offsetHeight;
+				if (y > document.body.offsetHeight)
+					y = 0;
+				if (x + width < 0)
+					x = document.body.offsetWidth;
+				if (x > document.body.offsetWidth)
+					x = 0;
+
+				squareState.x = x;
+				squareState.y = y;
+
+				const isPressed = Object
+					.entries(squareState.pressed)
+					.some((item, idx) => item[1] == true);
+
+				if (isPressed || squareState.colChanged) {
+					socket.emit('change', squareState);
+				}
+
+				squareState.pressed = {
+					up: false,
+					right: false,
+					down: false,
+					left: false
+				}
+
+				squareState.colChanged = false;
+
+				const coords = document.querySelector('#coordinates');
+				coords.innerText = `${x}, ${y}`;
+
+				square.style.left = `${x}px`;
+				square.style.top = `${y}px`;
+				square.style.background =
+					`rgb(${squareState.col[0]}, ${squareState.col[1]}, ${squareState.col[2]})`;
+
+				const nameEl =
+					square.querySelector('.square-name') || document.createElement('div');
+				nameEl.innerText = squareState.name;
+				nameEl.className = 'square-name';
+				square.appendChild(nameEl);
+
+				requestAnimationFrame(renderSquare);
+			}
+			requestAnimationFrame(renderSquare);
+
+			let rbIt = [0, 0];
+			gp.on('up0', () => {
+				rbIt[1] += squareConsts.colorSpeed;
+				if (rbIt[1] > 255) {
+					rbIt[1] = 0;
+					rbIt[0]++;
+					if (rbIt[0] > 5) {
+						rbIt[0] = 0;
+					}
+				}
+				squareState.col = getNextRainbowCol(squareConsts.col, rbIt);
+				squareState.colChanged = true;
+			});
+
+			let bwIt = [0, 0];
+			gp.on('down0', () => {
+				bwIt[1] += squareConsts.colorSpeed;
+				if (bwIt[1] > 255) {
+					bwIt[1] = 0;
+					bwIt[0]++;
+					if (bwIt[0] > 1) {
+						bwIt[0] = 0;
+					}
+				}
+				squareState.col = getNextBWCol(squareConsts.col, bwIt);
+				squareState.colChanged = true;
+			});
+
+			gp.on('up1', () => {
+				squareState.y -= squareConsts.speed;
+				squareState.pressed.up = true;
+			});
+
+			gp.on('right1', () => {
+				squareState.x += squareConsts.speed;
+				squareState.pressed.right = true;
+			});
+
+			gp.on('down1', () => {
+				squareState.y += squareConsts.speed;
+				squareState.pressed.down = true;
+			});
+
+			gp.on('left1', () => {
+				squareState.x -= squareConsts.speed;
+				squareState.pressed.left = true;
+			});
+		});
+
+		const getNextRainbowCol = (col, it) => {
+			const [i, j] = it;
+			switch (i) {
+				case 0:
+					col = [255, j, 0];
+					break;
+				case 1:
+					col = [255 - j, 255, 0];
+					break;
+				case 2:
+					col = [0, 255, j];
+					break;
+				case 3:
+					col = [0, 255 - j, 255];
+					break;
+				case 4:
+					col = [j, 0, 255];
+					break;
+				case 5:
+					col = [255, 0, 255 - j];
+					break;
+			}
+			return col;
+		}
+
+		const getNextBWCol = (col, it) => {
+			const [i, j] = it;
+			switch (i) {
+				case 0:
+					col = [j, j, j];
+					break;
+				case 1:
+					col = [255 - j, 255 - j, 255 - j];
+					break;
+			}
+			return col;
+		}
+	</script>
+</body>
+
+</html>
